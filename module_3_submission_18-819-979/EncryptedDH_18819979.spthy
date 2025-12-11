@@ -1,0 +1,203 @@
+theory EncryptedDH
+begin
+
+/* Signed Diffie-Hellman protocol, first attempt:
+   A -> B : A, aenc_B{g^x}  (x fresh)
+   B -> A : B, aenc_A{g^y, h(g^x)}  (y fresh)
+   A -> B : A, aenc_B{h(g^y)}  */
+
+
+/* ----------------- */
+/* Equational theory */
+/* ----------------- */
+
+/* Load the built-in Diffie-Hellman, asymmetric encryption and hashing equational theories */
+builtins: diffie-hellman, asymmetric-encryption, hashing
+
+
+
+/* ------------------ */
+/* Key infrastructure */
+/* ------------------ */
+
+rule GenKey:  // generate long-term key pair, publish the public key
+   [ Fr(~kX) ] 
+   -->
+   [ !Key($X, ~kX),  // notation: !Fact = persistent fact, not consumed by rules
+     !Pk($X, pk(~kX)),
+     Out(pk(~kX)) ]
+
+
+/*----------------*/
+/* Protocol rules */
+/*----------------*/
+
+/* Question 1 here */
+
+
+/* Initiator role */
+rule Init_1:
+  let gxI = 'g'^~xI 
+    in         
+    [ 
+      Fr(~xI),
+      !Pk($B, pkB) 
+    ]             
+     
+    -->
+
+    [ 
+      Init_1($A, $B, ~xI, gxI),
+      Out(<$A, aenc(gxI, pkB)>) 
+    ]  
+
+
+
+
+/* Responder role */
+rule Resp_1:
+  let gyR = 'g'^~yR
+      dgxI = adec(gxI, skB) 
+      g_xy = dgxI^~yR 
+   in
+   [ 
+     !Key($B, skB),
+     !Pk($A, pkA),
+     Fr(~yR),
+     In(<$A, gxI>)               
+    ]               
+  
+    --[RunningR($B, $A, g_xy)]->
+
+    [ 
+      Resp_1($A, $B, ~yR, gyR, dgxI, g_xy, skB), 
+      Out(<$B, aenc(<gyR, h(dgxI)>, pkA)>) 
+    ]
+
+
+
+
+/* Initiator role */
+rule Init_2:
+  let d_message = adec(e_message, skA)
+      dgyR = fst(d_message)
+      dghxI = snd(d_message)
+      g_xy = dgyR^~xI
+  in
+  [ 
+     Init_1($A, $B, ~xI, gxI),
+     !Key($A, skA),
+     !Pk($B, pkB),
+     In(<$B, e_message>)
+  ]  
+
+   --[ 
+       FinishedI($A),          
+       SecretI($A, $B , g_xy),
+       Eq(h(gxI), dghxI),
+       CommitI($A, $B, g_xy),
+       RunningI($A, $B, g_xy)
+    ]->      
+
+  [Out(<$A, aenc(h(dgyR), pkB)>)]
+
+
+
+/* Responder role */
+rule Resp_2:
+  let dhgyR = adec(hash_gy, skB)
+      g_xy = gxI^~yR
+  in
+  [
+     Resp_1($A, $B, ~yR, gyR, gxI, g_xy, skB),
+     In(<$A, hash_gy>)
+  ]
+
+  --[ 
+      FinishedR($B),             
+      SecretR($A, $B, g_xy),
+      Eq(h(gyR), dhgyR),
+      CommitR($B, $A, g_xy)
+  ]->
+
+  []
+
+
+/* ---------- */
+/* Key Reveal */
+/* ---------- */
+
+/* Question 2 here */
+
+
+rule Publish_secretK:
+[!Key(A, k)]
+
+--[Compromised(A)]->
+
+[Out(k)]
+
+ 
+/* ---------- */
+/* Restrictions */
+/* ---------- */
+
+restriction equality:
+"All x y #i. Eq(x,y) @i ==> x = y"
+
+
+/* ---------- */
+/* Properties */
+/* ---------- */
+
+/* Executability checks */
+lemma executableI:
+exists-trace "Ex #i A. FinishedI(A) @ i & not (Ex #j B. Compromised(B)@j)"
+
+lemma executableR:
+exists-trace "Ex #i B. FinishedR(B) @ i & not (Ex #j B. Compromised(B)@j)"
+
+
+/* Key secrecy:  (Question 3)
+   in all traces, if a key is marked as secret between two uncompromised agents,
+   then the attacker cannot learn it */
+
+lemma key_secrecyI:
+"All #i A B k.
+ (SecretI(A, B, k) @ i &
+  not ((Ex #l. Compromised(A) @ l) | (Ex #m. Compromised(B) @ m)))
+  ==> not (Ex #j. K(k) @ j)"
+
+lemma key_secrecyR:
+"All #i A B k.
+ (SecretR(A, B, k) @ i &
+  not ((Ex #l. Compromised(A) @ l) | (Ex #m. Compromised(B) @ m)))
+  ==> not (Ex #j. K(k) @ j)"
+
+
+
+/* Key agreement:  (Question 4)
+Please uncomment the following two lemmas for this question.
+*/
+
+
+
+lemma agreementR:
+"All #i A B k.
+  (CommitR( B, A, k) @ i &
+   not ((Ex #l. Compromised(A) @ l) | (Ex #m. Compromised(B) @ m)))
+   ==> (Ex #j. RunningI(A, B, k) @ j & j < i)"
+
+
+
+lemma agreementI:
+"All #i A B k.
+  (CommitI(A, B, k) @ i &
+   not ((Ex #l. Compromised(A) @ l) | (Ex #m. Compromised(B) @ m)))
+   ==> (Ex #j. RunningR(B, A, k) @ j & j < i)"
+
+
+end
+
+
+
